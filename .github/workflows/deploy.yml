@@ -11,12 +11,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to Cloudflare Workers
-        uses: cloudflare/wrangler-action@v3
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        # 默认执行 `wrangler deploy`（读取仓库根目录 wrangler.toml）
+          node-version: 24
+
+      - name: Install Wrangler 4.20.0
+        run: npm install -g wrangler@4.20.0
+
+      - name: Deploy to Cloudflare Workers
+        run: wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         # 前置要求（在 GitHub Repo → Settings → Secrets 中配置）：
         #   CLOUDFLARE_API_TOKEN  : 具备 Workers Scripts + D1 权限的 API Token
         #   CLOUDFLARE_ACCOUNT_ID : 47e9ef08e724b2aa5f8f172f5ca6a305
