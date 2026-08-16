@@ -10,7 +10,7 @@ const VERSION = "0.0.1";
 // 更新日志（北京时间）。同日有多条更新时会自动显示具体时间（HH:MM）以区分。
 // 维护约定：最新版本写在数组最前；time 格式 "YYYY-MM-DD HH:MM"。
 const CHANGELOG = [
-  { version: "0.0.1", time: "2026-08-16 18:30", note: "首次发布：页面顶部版本号、底部更新日志；每 6 小时自动抓取红狐全站热门写入 D1" },
+  { version: "0.0.1", time: "2026-08-16 19:05", note: "首次发布：页面顶部版本号、底部更新日志；每 6 小时自动抓取红狐全站热门写入 D1" },
 ];
 
 const API_URL = "https://redfox.hk/story/api/gzh/search/hotArticleNew";
