@@ -1,18 +1,19 @@
 // Cloudflare Worker: 公众号热门文章 -> D1 -> 网站
 // 功能:
-//   1) 每 6 小时(scheduled) 按「分类关键词」分别抓取红狐热门写入 D1（打标 category）
+//   1) 每 10 分钟(scheduled) 按「分类关键词」分别抓取红狐热门写入 D1（打标 category）
 //   2) 访问站点时按分类标签筛选展示「最近 7 天抓取到的」热门文章
 // 部署: wrangler deploy  (需先 wrangler d1 create 并回填 database_id, wrangler secret put REDFOX_API_KEY)
 
 // 版本号：初始 0.0.1；小更新 +0.0.1，重要更新 +0.1
-const VERSION = "0.0.3";
+const VERSION = "0.0.4";
 
 // 更新日志（北京时间）。同日有多条更新时会自动显示具体时间（HH:MM）以区分。
 // 维护约定：最新版本写在数组最前；time 格式 "YYYY-MM-DD HH:MM"。
 const CHANGELOG = [
+  { version: "0.0.4", time: "2026-08-16 20:37", note: "定时抓取频率调整为每 10 分钟，数据更新更及时" },
   { version: "0.0.3", time: "2026-08-16 19:21", note: "新增 12 个分类（推荐/科技/财经/健康/社会/娱乐/教育/体育/美食/旅行/汽车/育儿），按主题关键词分别抓取并打标；页面顶部加分类标签切换；每类 pageSize=50，解决文章数量少的问题" },
   { version: "0.0.2", time: "2026-08-16 11:15", note: "页面时间统一显示北京时间：抓取时间由 UTC 转为 UTC+8，发布时间原本即为北京时间保持不变" },
-  { version: "0.0.1", time: "2026-08-16 19:05", note: "首次发布：页面顶部版本号、底部更新日志；每 6 小时自动抓取红狐全站热门写入 D1" },
+  { version: "0.0.1", time: "2026-08-16 19:05", note: "首次发布：页面顶部版本号、底部更新日志；每 10 分钟自动抓取红狐全站热门写入 D1" },
 ];
 
 const API_URL = "https://redfox.hk/story/api/gzh/search/hotArticleNew";
@@ -274,13 +275,13 @@ async function renderSite(db, cat) {
   <div class="wrap">
     <header>
       <h1>📊 公众号热门文章 <span class="ver-badge">v${VERSION}</span></h1>
-      <div class="sub">按分类浏览「最近 7 天抓取到的」公众号爆款（每 6 小时更新）</div>
+      <div class="sub">按分类浏览「最近 7 天抓取到的」公众号爆款（每 10 分钟更新）</div>
     </header>
     <nav class="tabs">${tabs}</nav>
     <div class="stats">
       <div class="stat">${filter ? esc(filter) : "全部"} 收录 <b>${results.length}</b> 篇</div>
       <div class="stat">最近抓取 ${esc(updated)}</div>
-      <div class="stat">更新频率 每 6 小时</div>
+      <div class="stat">更新频率 每 10 分钟</div>
     </div>
     ${results.length ? `<div class="cards">${cards}</div>` : `<div class="empty">该分类暂无数据，定时任务将在下次抓取后更新。</div>`}
     ${renderChangelog()}

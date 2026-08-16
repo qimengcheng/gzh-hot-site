@@ -9,6 +9,6 @@ binding = "DB"
 database_name = "gzh-hot-db"
 database_id = "53a8de8a-3606-4fc0-a7d4-25269e6119d3"
 
-# 每 6 小时触发一次抓取（Cron: 0 */6 * * *）
+# 每 10 分钟触发一次抓取（Cron: */10 * * * *）
 [triggers]
-crons = ["0 */6 * * *"]
+crons = ["*/10 * * * *"]
