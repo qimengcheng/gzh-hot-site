@@ -1,0 +1,14 @@
+# 本地预览数据库（不入库，clone 后自行 fetch 生成）
+local/hot.db
+local/__pycache__/
+local/preview.html
+
+# Cloudflare / 密钥
+.wrangler/
+.env
+.dev.vars
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+*.log

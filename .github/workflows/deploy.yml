@@ -1,0 +1,23 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        # 默认执行 `wrangler deploy`（读取仓库根目录 wrangler.toml）
+        # 前置要求（在 GitHub Repo → Settings → Secrets 中配置）：
+        #   CLOUDFLARE_API_TOKEN  : 具备 Workers Scripts + D1 权限的 API Token
+        #   CLOUDFLARE_ACCOUNT_ID : 47e9ef08e724b2aa5f8f172f5ca6a305
+        # REDFOX_API_KEY 已在 Worker 上以 secret 形式配置，deploy 不会覆盖，无需在此传入。

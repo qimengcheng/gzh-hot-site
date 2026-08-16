@@ -1,0 +1,13 @@
+name = "gzh-hot-site"
+main = "src/worker.js"
+compatibility_date = "2024-09-23"
+
+# D1 数据库绑定（database_id 在 `wrangler d1 create gzh-hot-db` 后回填）
+[[d1_databases]]
+binding = "DB"
+database_name = "gzh-hot-db"
+database_id = "53a8de8a-3606-4fc0-a7d4-25269e6119d3"
+
+# 每 6 小时触发一次抓取（Cron: 0 */6 * * *）
+[triggers]
+crons = ["0 */6 * * *"]
