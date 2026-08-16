@@ -1,6 +1,7 @@
 name = "gzh-hot-site"
 main = "src/worker.js"
 compatibility_date = "2024-09-23"
+account_id = "47e9ef08e724b2aa5f8f172f5ca6a305"
 
 # D1 数据库绑定（database_id 在 `wrangler d1 create gzh-hot-db` 后回填）
 [[d1_databases]]
