@@ -5,11 +5,12 @@
 // 部署: wrangler deploy  (需先 wrangler d1 create 并回填 database_id, wrangler secret put REDFOX_API_KEY)
 
 // 版本号：初始 0.0.1；小更新 +0.0.1，重要更新 +0.1
-const VERSION = "0.0.1";
+const VERSION = "0.0.2";
 
 // 更新日志（北京时间）。同日有多条更新时会自动显示具体时间（HH:MM）以区分。
 // 维护约定：最新版本写在数组最前；time 格式 "YYYY-MM-DD HH:MM"。
 const CHANGELOG = [
+  { version: "0.0.2", time: "2026-08-16 11:15", note: "页面时间统一显示北京时间：抓取时间由 UTC 转为 UTC+8，发布时间原本即为北京时间保持不变" },
   { version: "0.0.1", time: "2026-08-16 19:05", note: "首次发布：页面顶部版本号、底部更新日志；每 6 小时自动抓取红狐全站热门写入 D1" },
 ];
 
@@ -97,6 +98,17 @@ function esc(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+// 将 D1 中存储的 UTC 时间(ISO, 带 Z) 转换为北京时间(UTC+8)的 "YYYY-MM-DD HH:MM" 字符串。
+// 关键：用 getUTC* 读取分量并在绝对时刻上显式 +8 小时，避免依赖运行时本地时区
+// （Cloudflare Worker 运行时为 UTC，本地开发可能在 +8，两种环境都必须得到正确北京时刻）。
+function utcToBeijing(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso).slice(0, 16); // 解析失败兜底
+  const beijing = new Date(d.getTime() + 8 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${beijing.getUTCFullYear()}-${p(beijing.getUTCMonth() + 1)}-${p(beijing.getUTCDate())} ${p(beijing.getUTCHours())}:${p(beijing.getUTCMinutes())}`;
+}
 
 function renderChangelog() {
   const dayCount = {};
@@ -139,7 +151,7 @@ async function renderSite(db) {
         <div class="card-meta">
           <span>👤 ${esc(r.author || "未知作者")}</span>
           <span>📅 发布 ${esc((r.public_time || "").slice(0, 16))}</span>
-          <span>🕒 抓取 ${esc((r.fetched_at || "").slice(0, 16))}</span>
+          <span>🕒 抓取 ${esc(utcToBeijing(r.fetched_at))}</span>
         </div>
         ${summary ? `<p class="card-summary">${esc(summary)}…</p>` : ""}
       </article>`;
@@ -147,7 +159,7 @@ async function renderSite(db) {
     .join("");
 
   const updated = results.length
-    ? (results[0].fetched_at || "").slice(0, 16)
+    ? utcToBeijing(results[0].fetched_at)
     : "—";
 
   return `<!DOCTYPE html>
