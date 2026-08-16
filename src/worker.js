@@ -1,20 +1,39 @@
 // Cloudflare Worker: 公众号热门文章 -> D1 -> 网站
 // 功能:
-//   1) 每 6 小时(scheduled) 抓取红狐「全站热门爆款」写入 D1
-//   2) 访问站点时展示「最近 7 天抓取到的」热门文章
+//   1) 每 6 小时(scheduled) 按「分类关键词」分别抓取红狐热门写入 D1（打标 category）
+//   2) 访问站点时按分类标签筛选展示「最近 7 天抓取到的」热门文章
 // 部署: wrangler deploy  (需先 wrangler d1 create 并回填 database_id, wrangler secret put REDFOX_API_KEY)
 
 // 版本号：初始 0.0.1；小更新 +0.0.1，重要更新 +0.1
-const VERSION = "0.0.2";
+const VERSION = "0.0.3";
 
 // 更新日志（北京时间）。同日有多条更新时会自动显示具体时间（HH:MM）以区分。
 // 维护约定：最新版本写在数组最前；time 格式 "YYYY-MM-DD HH:MM"。
 const CHANGELOG = [
+  { version: "0.0.3", time: "2026-08-16 19:21", note: "新增 12 个分类（推荐/科技/财经/健康/社会/娱乐/教育/体育/美食/旅行/汽车/育儿），按主题关键词分别抓取并打标；页面顶部加分类标签切换；每类 pageSize=50，解决文章数量少的问题" },
   { version: "0.0.2", time: "2026-08-16 11:15", note: "页面时间统一显示北京时间：抓取时间由 UTC 转为 UTC+8，发布时间原本即为北京时间保持不变" },
   { version: "0.0.1", time: "2026-08-16 19:05", note: "首次发布：页面顶部版本号、底部更新日志；每 6 小时自动抓取红狐全站热门写入 D1" },
 ];
 
 const API_URL = "https://redfox.hk/story/api/gzh/search/hotArticleNew";
+
+// 分类配置：label 用于展示与标签；kw 为传给红狐 API 的关键词（空=全站热门）；pages 为翻页数。
+// 每类 pageSize=50（见 fetchHotArticles），故每类单次抓取约 50 篇，解决「数量少」。
+const CATEGORIES = [
+  { label: "推荐", kw: "", pages: 1 },
+  { label: "科技", kw: "科技", pages: 1 },
+  { label: "财经", kw: "财经", pages: 1 },
+  { label: "健康", kw: "健康", pages: 1 },
+  { label: "社会", kw: "社会", pages: 1 },
+  { label: "娱乐", kw: "娱乐", pages: 1 },
+  { label: "教育", kw: "教育", pages: 1 },
+  { label: "体育", kw: "体育", pages: 1 },
+  { label: "美食", kw: "美食", pages: 1 },
+  { label: "旅行", kw: "旅行", pages: 1 },
+  { label: "汽车", kw: "汽车", pages: 1 },
+  { label: "育儿", kw: "育儿", pages: 1 },
+];
+const CAT_LABELS = ["全部", ...CATEGORIES.map((c) => c.label)];
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -27,9 +46,11 @@ function daysAgoISO(n) {
   return new Date(Date.now() - n * 86400000).toISOString();
 }
 
-async function fetchHotArticles(apiKey) {
+async function fetchHotArticles(apiKey, kw, page) {
   const body = JSON.stringify({
-    keyword: "", // 空关键词 = 全站热门
+    keyword: kw || "",
+    pageNum: page || 1,
+    pageSize: 50,
     startDate: daysAgoStr(30),
     endDate: todayStr(),
     source: "公众号爆款文章洞察-WorkBuddy",
@@ -45,20 +66,21 @@ async function fetchHotArticles(apiKey) {
   return json.data.articles || [];
 }
 
-async function upsertArticles(db, articles, fetchedAt) {
+async function upsertArticles(db, articles, fetchedAt, category) {
   if (!articles.length) return 0;
   const queries = articles.map((a) =>
     db
       .prepare(
         `INSERT INTO hot_articles
-          (id, title, author, url, image_url, clicks_count, like_count, watch_count, comments_count, public_time, summary, fetched_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, title, author, url, image_url, clicks_count, like_count, watch_count, comments_count, public_time, summary, fetched_at, category)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            title=excluded.title, author=excluded.author, url=excluded.url,
            image_url=excluded.image_url, clicks_count=excluded.clicks_count,
            like_count=excluded.like_count, watch_count=excluded.watch_count,
            comments_count=excluded.comments_count, public_time=excluded.public_time,
            summary=excluded.summary, fetched_at=excluded.fetched_at`
+        // 注意：category 不在 DO UPDATE 中，保留首次分类（同一篇文章只归入最先抓到它的类目）
       )
       .bind(
         String(a.id),
@@ -72,17 +94,47 @@ async function upsertArticles(db, articles, fetchedAt) {
         Number(a.commentsCount) || 0,
         a.publicTime || "",
         a.summary || "",
-        fetchedAt
+        fetchedAt,
+        category
       )
   );
   await db.batch(queries);
   return articles.length;
 }
 
+// 幂等建表补列：新增 category 字段（默认 '推荐'）。模块级 schemaReady 避免每次请求都执行 ALTER。
+let schemaReady = false;
+async function ensureSchema(db) {
+  if (schemaReady) return;
+  try {
+    await db.exec(
+      "ALTER TABLE hot_articles ADD COLUMN category TEXT NOT NULL DEFAULT '推荐'"
+    );
+    schemaReady = true;
+  } catch (e) {
+    // 列已存在属于正常情况，标记为已就绪；其它错误记录后下次重试
+    if (e && /duplicate column|already exists/i.test(e.message || "")) schemaReady = true;
+    else console.error("ensureSchema error:", e && e.message);
+  }
+}
+
 async function runFetch(env) {
-  const articles = await fetchHotArticles(env.REDFOX_API_KEY);
-  const n = await upsertArticles(env.DB, articles, new Date().toISOString());
-  return n;
+  await ensureSchema(env.DB);
+  let total = 0;
+  const fetchedAt = new Date().toISOString();
+  for (const cat of CATEGORIES) {
+    for (let p = 1; p <= cat.pages; p++) {
+      try {
+        const arts = await fetchHotArticles(env.REDFOX_API_KEY, cat.kw, p);
+        const n = await upsertArticles(env.DB, arts, fetchedAt, cat.label);
+        total += n;
+        console.log(`fetch cat=${cat.label} page=${p} count=${arts.length} upsert=${n}`);
+      } catch (e) {
+        console.error(`fetch cat=${cat.label} page=${p} error:`, e.message);
+      }
+    }
+  }
+  return total;
 }
 
 function fmtNum(n) {
@@ -124,16 +176,24 @@ function renderChangelog() {
   return `<section class="changelog"><h2>📝 更新日志</h2><ul>${items}</ul></section>`;
 }
 
-async function renderSite(db) {
+async function renderSite(db, cat) {
+  await ensureSchema(db);
+  // cat 仅接受已知标签，未知值回落到「全部」，避免误匹配导致空白
+  const filter = CAT_LABELS.includes(cat) && cat !== "全部" ? cat : null;
   const { results } = await db
     .prepare(
       `SELECT * FROM hot_articles
-       WHERE fetched_at >= ?
-       ORDER BY fetched_at DESC, clicks_count DESC
+       WHERE fetched_at >= ? AND (? IS NULL OR category = ?)
+       ORDER BY clicks_count DESC, fetched_at DESC
        LIMIT 300`
     )
-    .bind(daysAgoISO(7))
+    .bind(daysAgoISO(7), filter, filter)
     .all();
+
+  const tabs = CAT_LABELS.map((t) => {
+    const active = t === (filter || "全部") ? " class=\"active\"" : "";
+    return `<a href="?cat=${encodeURIComponent(t)}"${active}>${esc(t)}</a>`;
+  }).join("");
 
   const cards = results
     .map((r) => {
@@ -162,6 +222,8 @@ async function renderSite(db) {
     ? utcToBeijing(results[0].fetched_at)
     : "—";
 
+  const catTitle = filter ? ` · ${esc(filter)}` : "";
+
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -173,9 +235,14 @@ async function renderSite(db) {
   body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
          background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); min-height:100vh; padding:24px; color:#2d3436; }
   .wrap { max-width:920px; margin:0 auto; }
-  header { text-align:center; color:#fff; padding:18px 0 26px; }
+  header { text-align:center; color:#fff; padding:18px 0 18px; }
   header h1 { font-size:2em; margin-bottom:8px; }
   header .sub { opacity:.92; font-size:.98em; }
+  .tabs { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:6px 0 18px; }
+  .tabs a { background:rgba(255,255,255,.2); color:#fff; text-decoration:none; padding:7px 14px; border-radius:20px;
+            font-size:.88em; transition:all .15s ease; }
+  .tabs a:hover { background:rgba(255,255,255,.35); }
+  .tabs a.active { background:#fff; color:#6c5ce7; font-weight:700; }
   .stats { display:flex; gap:12px; justify-content:center; margin-bottom:22px; flex-wrap:wrap; }
   .stat { background:rgba(255,255,255,.18); color:#fff; border-radius:12px; padding:10px 18px; font-size:.9em; }
   .card { background:#fff; border-radius:14px; box-shadow:0 6px 16px rgba(0,0,0,.12); padding:18px 20px; margin-bottom:16px;
@@ -207,14 +274,15 @@ async function renderSite(db) {
   <div class="wrap">
     <header>
       <h1>📊 公众号热门文章 <span class="ver-badge">v${VERSION}</span></h1>
-      <div class="sub">展示「最近 7 天抓取到的」全站爆款（阅读 5000+）</div>
+      <div class="sub">按分类浏览「最近 7 天抓取到的」公众号爆款（每 6 小时更新）</div>
     </header>
+    <nav class="tabs">${tabs}</nav>
     <div class="stats">
-      <div class="stat">收录文章 <b>${results.length}</b> 篇</div>
+      <div class="stat">${filter ? esc(filter) : "全部"} 收录 <b>${results.length}</b> 篇</div>
       <div class="stat">最近抓取 ${esc(updated)}</div>
       <div class="stat">更新频率 每 6 小时</div>
     </div>
-    ${results.length ? `<div class="cards">${cards}</div>` : `<div class="empty">暂无数据，定时任务将在下次抓取后更新。</div>`}
+    ${results.length ? `<div class="cards">${cards}</div>` : `<div class="empty">该分类暂无数据，定时任务将在下次抓取后更新。</div>`}
     ${renderChangelog()}
     <footer>数据来源：红狐数据 · 公众号公开文章，版权归原作者所有</footer>
   </div>
@@ -241,7 +309,8 @@ export default {
         });
       }
     }
-    const html = await renderSite(env.DB);
+    const cat = url.searchParams.get("cat") || "全部";
+    const html = await renderSite(env.DB, cat);
     return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
   },
 };
